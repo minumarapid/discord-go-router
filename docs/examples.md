@@ -121,15 +121,29 @@ dgr.RegSlash(users, "ban", "Ban a user", func(c *dgr.Context[BanArgs]) {
 
 ```go
 dgr.RegSlash(bot, "button", "Show a button", func(c *dgr.Context[struct{}]) {
-	button, err := c.NewButton("Click me", discordgo.SuccessButton, func(c *dgr.Context[struct{}]) {
-		_ = c.Reply("Clicked", dgr.WithEphemeral())
+	yes, err := c.NewButton("Yes", discordgo.SuccessButton, func(c *dgr.Context[struct{}]) {
+		_ = c.Reply("Yes", dgr.WithEphemeral())
 	})
 	if err != nil {
 		_ = c.Reply("Could not create button", dgr.WithEphemeral())
 		return
 	}
 
-	_ = c.Reply("Press the button", dgr.WithEphemeral(), dgr.WithButton(button))
+	no, err := c.NewButton("No", discordgo.DangerButton, func(c *dgr.Context[struct{}]) {
+		_ = c.Reply("No", dgr.WithEphemeral())
+	})
+	if err != nil {
+		_ = c.Reply("Could not create button", dgr.WithEphemeral())
+		return
+	}
+
+	row, err := c.NewButtonRow(yes, no)
+	if err != nil {
+		_ = c.Reply("Could not create buttons", dgr.WithEphemeral())
+		return
+	}
+
+	_ = c.Reply("Choose", dgr.WithEphemeral(), dgr.WithButtons(row))
 })
 ```
 

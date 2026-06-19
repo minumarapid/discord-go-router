@@ -197,12 +197,12 @@ _ = c.Reply("", dgr.WithEmbeds(embed))
 
 ## Buttons
 
-Create a button from the current context, then pass it to `Reply`.
+Create buttons from the current context, then pass them to `Reply`.
 The button handler receives a new `Context[T]` with the same `Args`.
 
 ```go
 dgr.RegSlash(bot, "confirm", "Show a confirm button", func(c *dgr.Context[struct{}]) {
-	button, err := c.NewButton("Confirm", discordgo.PrimaryButton, func(c *dgr.Context[struct{}]) {
+	yes, err := c.NewButton("Confirm", discordgo.SuccessButton, func(c *dgr.Context[struct{}]) {
 		_ = c.Reply("Confirmed", dgr.WithEphemeral())
 	})
 	if err != nil {
@@ -210,7 +210,21 @@ dgr.RegSlash(bot, "confirm", "Show a confirm button", func(c *dgr.Context[struct
 		return
 	}
 
-	_ = c.Reply("Continue?", dgr.WithEphemeral(), dgr.WithButton(button))
+	no, err := c.NewButton("Cancel", discordgo.DangerButton, func(c *dgr.Context[struct{}]) {
+		_ = c.Reply("Cancelled", dgr.WithEphemeral())
+	})
+	if err != nil {
+		_ = c.Reply("Failed to create button", dgr.WithEphemeral())
+		return
+	}
+
+	row, err := c.NewButtonRow(yes, no)
+	if err != nil {
+		_ = c.Reply("Failed to create buttons", dgr.WithEphemeral())
+		return
+	}
+
+	_ = c.Reply("Continue?", dgr.WithEphemeral(), dgr.WithButtons(row))
 })
 ```
 

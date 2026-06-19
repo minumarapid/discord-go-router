@@ -12,6 +12,10 @@ type ButtonInvoker interface {
 	Invoke(s *discordgo.Session, i *discordgo.Interaction)
 }
 
+type ButtonComponent interface {
+	ToButtonComponent() discordgo.Button
+}
+
 type Button[T any] struct {
 	Text     string
 	CustomID string
@@ -19,6 +23,10 @@ type Button[T any] struct {
 	Handler  func(c *Context[T])
 	Args     T
 	dgr      *Dgr
+}
+
+type ButtonRow struct {
+	Buttons []ButtonComponent
 }
 
 func (b *Button[T]) Invoke(s *discordgo.Session, i *discordgo.Interaction) {
@@ -34,15 +42,40 @@ func (b *Button[T]) Invoke(s *discordgo.Session, i *discordgo.Interaction) {
 	b.Handler(newCtx)
 }
 
+func (b *Button[T]) ToButtonComponent() discordgo.Button {
+	if b == nil {
+		return discordgo.Button{}
+	}
+	return discordgo.Button{
+		Label:    b.Text,
+		Style:    b.Style,
+		CustomID: b.CustomID,
+	}
+}
+
 func (b *Button[T]) ToComponent() discordgo.MessageComponent {
 	return discordgo.ActionsRow{
 		Components: []discordgo.MessageComponent{
-			discordgo.Button{
-				Label:    b.Text,
-				Style:    b.Style,
-				CustomID: b.CustomID,
-			},
+			b.ToButtonComponent(),
 		},
+	}
+}
+
+func (r *ButtonRow) ToComponent() discordgo.MessageComponent {
+	if r == nil {
+		return discordgo.ActionsRow{}
+	}
+
+	components := make([]discordgo.MessageComponent, 0, len(r.Buttons))
+	for _, button := range r.Buttons {
+		if button == nil {
+			continue
+		}
+		components = append(components, button.ToButtonComponent())
+	}
+
+	return discordgo.ActionsRow{
+		Components: components,
 	}
 }
 

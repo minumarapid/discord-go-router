@@ -29,6 +29,14 @@ func WithButton[T any](button *Button[T]) ReplyOption {
 	}
 }
 
+func WithButtons(row *ButtonRow) ReplyOption {
+	return func(data *discordgo.InteractionResponseData) {
+		if row != nil {
+			data.Components = append(data.Components, row.ToComponent())
+		}
+	}
+}
+
 func WithEmbeds(embeds ...*discordgo.MessageEmbed) ReplyOption {
 	return func(data *discordgo.InteractionResponseData) {
 		data.Embeds = append(data.Embeds, embeds...)
@@ -83,4 +91,19 @@ func (c *Context[T]) NewButton(text string, style discordgo.ButtonStyle, handler
 	c.dgr.mu.Unlock()
 
 	return btn, nil
+}
+
+func (c *Context[T]) NewButtonRow(buttons ...ButtonComponent) (*ButtonRow, error) {
+	row := &ButtonRow{
+		Buttons: make([]ButtonComponent, 0, len(buttons)),
+	}
+	for _, button := range buttons {
+		if button != nil {
+			row.Buttons = append(row.Buttons, button)
+		}
+	}
+	if len(row.Buttons) > 5 {
+		return nil, errors.New("dgr: button row cannot contain more than 5 buttons")
+	}
+	return row, nil
 }

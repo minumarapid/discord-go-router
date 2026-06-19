@@ -115,7 +115,7 @@ func (c *Context[T]) Reply(content string, opts ...ReplyOption) error
 ```
 
 Sends an interaction response. Use `WithEphemeral`, `WithButton`, and
-`WithEmbeds` to configure the response.
+`WithButtons`, and `WithEmbeds` to configure the response.
 
 ### Reply Options
 
@@ -124,6 +124,7 @@ type ReplyOption func(*discordgo.InteractionResponseData)
 
 func WithEphemeral() ReplyOption
 func WithButton[T any](button *Button[T]) ReplyOption
+func WithButtons(row *ButtonRow) ReplyOption
 func WithEmbeds(embeds ...*discordgo.MessageEmbed) ReplyOption
 ```
 
@@ -131,11 +132,14 @@ func WithEmbeds(embeds ...*discordgo.MessageEmbed) ReplyOption
 
 ```go
 func (c *Context[T]) NewButton(text string, style discordgo.ButtonStyle, handler func(c *Context[T])) (*Button[T], error)
+func (c *Context[T]) NewButtonRow(buttons ...ButtonComponent) (*ButtonRow, error)
 ```
 
 Creates and registers a button tied to the router. The handler receives the same
 generic argument type as the original context, and the current `Args` value is
-copied into the button handler context.
+copied into the button handler context. `NewButtonRow` groups up to 5 buttons
+into one Discord action row so they render horizontally. Buttons with different
+generic argument types can be placed in the same row.
 
 ## Types
 
