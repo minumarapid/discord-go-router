@@ -114,7 +114,19 @@ type Choice bool
 ```
 
 Use `Choice` fields inside a nested struct to define string choices for a slash
-command option. The chosen field is set to `true`.
+command option. The chosen field is set to `true`. Choice fields can customize
+their Discord choice metadata with tags:
+
+```go
+type ColorChoices struct {
+	Red   dgr.Choice `name:"Red" value:"red"`
+	Green dgr.Choice `dgr:"green"`
+}
+```
+
+`dgr` sets both name and value, `name` sets the Discord choice name, `label` is
+an alias for `name`, and `value` sets the Discord choice value. Without tags,
+the Go field name is used for both name and value.
 
 ### `Selected`
 
@@ -123,6 +135,15 @@ func Selected[T any](structPtr *T) *Choice
 ```
 
 Returns a pointer to the selected `Choice` field in a choice struct, or `nil`
+when no choice is selected.
+
+### `SelectedChoiceOf`
+
+```go
+func SelectedChoiceOf[T any](structPtr *T) *SelectedChoice
+```
+
+Returns the selected choice with its configured `Name` and `Value`, or `nil`
 when no choice is selected.
 
 ### `InteractionUser`

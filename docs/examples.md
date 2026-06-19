@@ -59,6 +59,30 @@ dgr.RegSlash(bot, "mention", "Inspect a mentionable", func(c *dgr.Context[Mentio
 })
 ```
 
+## Tagged Choices
+
+```go
+type ModeChoices struct {
+	Fast dgr.Choice `name:"Fast mode" value:"fast"`
+	Safe dgr.Choice `label:"Safe mode" value:"safe"`
+	Auto dgr.Choice `dgr:"auto"`
+}
+
+type ModeArgs struct {
+	Mode ModeChoices `dgr:"mode" desc:"Mode" required:"true"`
+}
+
+dgr.RegSlash(bot, "mode", "Select a mode", func(c *dgr.Context[ModeArgs]) {
+	selected := dgr.SelectedChoiceOf(&c.Args.Mode)
+	if selected == nil {
+		_ = c.Reply("No mode selected", true, nil)
+		return
+	}
+
+	_ = c.Reply("Selected: "+selected.Value, true, nil)
+})
+```
+
 ## Button Response
 
 ```go

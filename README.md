@@ -107,9 +107,9 @@ The selected choice is set to `true`.
 
 ```go
 type ColorChoices struct {
-	Red   dgr.Choice
-	Blue  dgr.Choice
-	Green dgr.Choice
+	Red   dgr.Choice `name:"Red" value:"red"`
+	Blue  dgr.Choice `name:"Blue" value:"blue"`
+	Green dgr.Choice `dgr:"green"`
 }
 
 type PaintArgs struct {
@@ -117,17 +117,28 @@ type PaintArgs struct {
 }
 
 dgr.RegSlash(bot, "paint", "Pick a color", func(c *dgr.Context[PaintArgs]) {
-	selected := dgr.Selected(&c.Args.Color)
+	selected := dgr.SelectedChoiceOf(&c.Args.Color)
 	if selected == nil {
 		_ = c.Reply("No color selected", true, nil)
 		return
 	}
 
-	_ = c.Reply("Color selected", true, nil)
+	_ = c.Reply("Color selected: "+selected.Value, true, nil)
 })
 ```
 
-The Discord choice name and value are currently the Go field name.
+Choice fields support these tags:
+
+| Tag | Meaning |
+| --- | --- |
+| `dgr:"value"` | Sets both Discord choice name and value |
+| `name:"Display name"` | Sets the Discord choice name |
+| `label:"Display name"` | Alias for `name` |
+| `value:"stored-value"` | Sets the Discord choice value |
+
+Without tags, the Go field name is used for both the Discord choice name and
+value. `Selected` returns the selected `*Choice`; `SelectedChoiceOf` returns the
+selected choice plus its configured `Name` and `Value`.
 
 ## Replies
 

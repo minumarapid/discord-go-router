@@ -16,7 +16,21 @@ var (
 	mentionablePtr       = reflect.TypeOf((*Mentionable)(nil))
 )
 
+type SelectedChoice struct {
+	Choice *Choice
+	Name   string
+	Value  string
+}
+
 func Selected[T any](structPtr *T) *Choice {
+	selected := SelectedChoiceOf(structPtr)
+	if selected == nil {
+		return nil
+	}
+	return selected.Choice
+}
+
+func SelectedChoiceOf[T any](structPtr *T) *SelectedChoice {
 	if structPtr == nil {
 		return nil
 	}
@@ -33,9 +47,15 @@ func Selected[T any](structPtr *T) *Choice {
 
 	for i := 0; i < v.NumField(); i++ {
 		field := v.Field(i)
+		fieldT := v.Type().Field(i)
 
 		if field.Type() == choiceType && field.Bool() && field.CanAddr() && field.Addr().CanInterface() {
-			return field.Addr().Interface().(*Choice)
+			spec := choiceSpecFromField(fieldT)
+			return &SelectedChoice{
+				Choice: field.Addr().Interface().(*Choice),
+				Name:   spec.Name,
+				Value:  spec.Value,
+			}
 		}
 	}
 	return nil
@@ -107,9 +127,10 @@ func RegSlashE[T any](d *Dgr, name string, description string, handler func(c *C
 				if subField.Type != choiceType {
 					continue
 				}
+				spec := choiceSpecFromField(subField)
 				choices = append(choices, &discordgo.ApplicationCommandOptionChoice{
-					Name:  subField.Name,
-					Value: subField.Name,
+					Name:  spec.Name,
+					Value: spec.Value,
 				})
 			}
 		default:
@@ -346,9 +367,51 @@ func setScalarOrChoiceValue(fieldV reflect.Value, opt *discordgo.ApplicationComm
 	case reflect.Bool:
 		fieldV.SetBool(opt.BoolValue())
 	case reflect.Struct:
-		structFieldV := fieldV.FieldByName(opt.StringValue())
-		if structFieldV.IsValid() && structFieldV.Type() == choiceType && structFieldV.CanSet() {
-			structFieldV.SetBool(true)
+		setChoiceValue(fieldV, opt.StringValue())
+	}
+}
+
+type choiceSpec struct {
+	Name  string
+	Value string
+}
+
+func choiceSpecFromField(field reflect.StructField) choiceSpec {
+	spec := choiceSpec{
+		Name:  field.Name,
+		Value: field.Name,
+	}
+
+	if tag := field.Tag.Get("dgr"); tag != "" {
+		spec.Name = tag
+		spec.Value = tag
+	}
+	if tag := field.Tag.Get("name"); tag != "" {
+		spec.Name = tag
+	}
+	if tag := field.Tag.Get("label"); tag != "" {
+		spec.Name = tag
+	}
+	if tag := field.Tag.Get("value"); tag != "" {
+		spec.Value = tag
+	}
+
+	return spec
+}
+
+func setChoiceValue(fieldV reflect.Value, selectedValue string) {
+	fieldType := fieldV.Type()
+	for i := 0; i < fieldV.NumField(); i++ {
+		choiceFieldV := fieldV.Field(i)
+		choiceFieldT := fieldType.Field(i)
+		if choiceFieldV.Type() != choiceType || !choiceFieldV.CanSet() {
+			continue
+		}
+
+		spec := choiceSpecFromField(choiceFieldT)
+		if selectedValue == spec.Value || selectedValue == choiceFieldT.Name {
+			choiceFieldV.SetBool(true)
+			return
 		}
 	}
 }
