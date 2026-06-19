@@ -9,7 +9,12 @@ type SayArgs struct {
 }
 
 dgr.RegSlash(bot, "say", "Echo a message", func(c *dgr.Context[SayArgs]) {
-	_ = c.Reply(c.Args.Message, c.Args.Hidden, nil)
+	opts := []dgr.ReplyOption{}
+	if c.Args.Hidden {
+		opts = append(opts, dgr.WithEphemeral())
+	}
+
+	_ = c.Reply(c.Args.Message, opts...)
 })
 ```
 
@@ -23,7 +28,7 @@ dgr.RegSlash(bot, "status", "Show status", func(c *dgr.Context[struct{}]) {
 		Color:       0x57F287,
 	}
 
-	_ = c.Reply("", false, nil, embed)
+	_ = c.Reply("", dgr.WithEmbeds(embed))
 })
 ```
 
@@ -38,7 +43,7 @@ type TargetArgs struct {
 }
 
 dgr.RegSlash(bot, "target", "Inspect resolved options", func(c *dgr.Context[TargetArgs]) {
-	_ = c.Reply("Options parsed", true, nil)
+	_ = c.Reply("Options parsed", dgr.WithEphemeral())
 })
 ```
 
@@ -52,9 +57,9 @@ type MentionArgs struct {
 dgr.RegSlash(bot, "mention", "Inspect a mentionable", func(c *dgr.Context[MentionArgs]) {
 	switch c.Args.Target.Type {
 	case dgr.MentionableTypeUser:
-		_ = c.Reply("User selected", true, nil)
+		_ = c.Reply("User selected", dgr.WithEphemeral())
 	case dgr.MentionableTypeRole:
-		_ = c.Reply("Role selected", true, nil)
+		_ = c.Reply("Role selected", dgr.WithEphemeral())
 	}
 })
 ```
@@ -75,11 +80,11 @@ type ModeArgs struct {
 dgr.RegSlash(bot, "mode", "Select a mode", func(c *dgr.Context[ModeArgs]) {
 	selected := dgr.SelectedChoiceOf(&c.Args.Mode)
 	if selected == nil {
-		_ = c.Reply("No mode selected", true, nil)
+		_ = c.Reply("No mode selected", dgr.WithEphemeral())
 		return
 	}
 
-	_ = c.Reply("Selected: "+selected.Value, true, nil)
+	_ = c.Reply("Selected: "+selected.Value, dgr.WithEphemeral())
 })
 ```
 
@@ -88,14 +93,14 @@ dgr.RegSlash(bot, "mode", "Select a mode", func(c *dgr.Context[ModeArgs]) {
 ```go
 dgr.RegSlash(bot, "button", "Show a button", func(c *dgr.Context[struct{}]) {
 	button, err := c.NewButton("Click me", discordgo.SuccessButton, func(c *dgr.Context[struct{}]) {
-		_ = c.Reply("Clicked", true, nil)
+		_ = c.Reply("Clicked", dgr.WithEphemeral())
 	})
 	if err != nil {
-		_ = c.Reply("Could not create button", true, nil)
+		_ = c.Reply("Could not create button", dgr.WithEphemeral())
 		return
 	}
 
-	_ = c.Reply("Press the button", true, button)
+	_ = c.Reply("Press the button", dgr.WithEphemeral(), dgr.WithButton(button))
 })
 ```
 

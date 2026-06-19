@@ -88,12 +88,21 @@ command options or context menu target.
 ### `Reply`
 
 ```go
-func (c *Context[T]) Reply(content string, ephemeral bool, button *Button[T], embeds ...*discordgo.MessageEmbed) error
+func (c *Context[T]) Reply(content string, opts ...ReplyOption) error
 ```
 
-Sends an interaction response. Set `ephemeral` to `true` to use
-`discordgo.MessageFlagsEphemeral`. Pass `nil` for `button` when no component is
-needed. One or more embeds can be passed after the button argument.
+Sends an interaction response. Use `WithEphemeral`, `WithButton`, and
+`WithEmbeds` to configure the response.
+
+### Reply Options
+
+```go
+type ReplyOption func(*discordgo.InteractionResponseData)
+
+func WithEphemeral() ReplyOption
+func WithButton[T any](button *Button[T]) ReplyOption
+func WithEmbeds(embeds ...*discordgo.MessageEmbed) ReplyOption
+```
 
 ### `NewButton`
 

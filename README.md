@@ -50,7 +50,7 @@ func main() {
 			Color:       0x57F287,
 		}
 
-		if err := c.Reply("pong", false, nil, embed); err != nil {
+		if err := c.Reply("pong", dgr.WithEmbeds(embed)); err != nil {
 			log.Println(err)
 		}
 	})
@@ -119,11 +119,11 @@ type PaintArgs struct {
 dgr.RegSlash(bot, "paint", "Pick a color", func(c *dgr.Context[PaintArgs]) {
 	selected := dgr.SelectedChoiceOf(&c.Args.Color)
 	if selected == nil {
-		_ = c.Reply("No color selected", true, nil)
+		_ = c.Reply("No color selected", dgr.WithEphemeral())
 		return
 	}
 
-	_ = c.Reply("Color selected: "+selected.Value, true, nil)
+	_ = c.Reply("Color selected: "+selected.Value, dgr.WithEphemeral())
 })
 ```
 
@@ -145,7 +145,7 @@ selected choice plus its configured `Name` and `Value`.
 Use `Context.Reply` to respond to the interaction.
 
 ```go
-err := c.Reply("hello", false, nil)
+err := c.Reply("hello")
 ```
 
 Signature:
@@ -153,22 +153,20 @@ Signature:
 ```go
 func (c *Context[T]) Reply(
 	content string,
-	ephemeral bool,
-	button *Button[T],
-	embeds ...*discordgo.MessageEmbed,
+	opts ...ReplyOption,
 ) error
 ```
 
 Examples:
 
 ```go
-_ = c.Reply("Only you can see this", true, nil)
+_ = c.Reply("Only you can see this", dgr.WithEphemeral())
 
 embed := &discordgo.MessageEmbed{
 	Title:       "Result",
 	Description: "Done",
 }
-_ = c.Reply("", false, nil, embed)
+_ = c.Reply("", dgr.WithEmbeds(embed))
 ```
 
 ## Buttons
@@ -179,14 +177,14 @@ The button handler receives a new `Context[T]` with the same `Args`.
 ```go
 dgr.RegSlash(bot, "confirm", "Show a confirm button", func(c *dgr.Context[struct{}]) {
 	button, err := c.NewButton("Confirm", discordgo.PrimaryButton, func(c *dgr.Context[struct{}]) {
-		_ = c.Reply("Confirmed", true, nil)
+		_ = c.Reply("Confirmed", dgr.WithEphemeral())
 	})
 	if err != nil {
-		_ = c.Reply("Failed to create button", true, nil)
+		_ = c.Reply("Failed to create button", dgr.WithEphemeral())
 		return
 	}
 
-	_ = c.Reply("Continue?", true, button)
+	_ = c.Reply("Continue?", dgr.WithEphemeral(), dgr.WithButton(button))
 })
 ```
 
@@ -196,7 +194,7 @@ Message context menu command:
 
 ```go
 dgr.RegMessageCtx(bot, "Inspect message", func(c *dgr.Context[discordgo.Message]) {
-	_ = c.Reply(c.Args.Content, true, nil)
+	_ = c.Reply(c.Args.Content, dgr.WithEphemeral())
 })
 ```
 
@@ -204,7 +202,7 @@ User context menu command:
 
 ```go
 dgr.RegUserCtx(bot, "Inspect user", func(c *dgr.Context[discordgo.User]) {
-	_ = c.Reply(c.Args.Username, true, nil)
+	_ = c.Reply(c.Args.Username, dgr.WithEphemeral())
 })
 ```
 

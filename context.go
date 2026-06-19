@@ -13,29 +13,45 @@ type Context[T any] struct {
 	dgr         *Dgr
 }
 
-func (c *Context[T]) Reply(content string, ephemeral bool, button *Button[T], embeds ...*discordgo.MessageEmbed) error {
+type ReplyOption func(*discordgo.InteractionResponseData)
+
+func WithEphemeral() ReplyOption {
+	return func(data *discordgo.InteractionResponseData) {
+		data.Flags |= discordgo.MessageFlagsEphemeral
+	}
+}
+
+func WithButton[T any](button *Button[T]) ReplyOption {
+	return func(data *discordgo.InteractionResponseData) {
+		if button != nil {
+			data.Components = append(data.Components, button.ToComponent())
+		}
+	}
+}
+
+func WithEmbeds(embeds ...*discordgo.MessageEmbed) ReplyOption {
+	return func(data *discordgo.InteractionResponseData) {
+		data.Embeds = append(data.Embeds, embeds...)
+	}
+}
+
+func (c *Context[T]) Reply(content string, opts ...ReplyOption) error {
 	if c == nil || c.Session == nil || c.Interaction == nil {
 		return errors.New("dgr: nil context, session, or interaction")
 	}
 
-	var flags discordgo.MessageFlags
-	if ephemeral {
-		flags = discordgo.MessageFlagsEphemeral
+	data := &discordgo.InteractionResponseData{
+		Content: content,
 	}
-
-	var components []discordgo.MessageComponent
-	if button != nil {
-		components = append(components, button.ToComponent())
+	for _, opt := range opts {
+		if opt != nil {
+			opt(data)
+		}
 	}
 
 	return c.Session.InteractionRespond(c.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Content:    content,
-			Flags:      flags,
-			Components: components,
-			Embeds:     embeds,
-		},
+		Data: data,
 	})
 }
 
