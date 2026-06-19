@@ -1,9 +1,11 @@
 package dgr
 
 import (
+	"errors"
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"github.com/bwmarrin/discordgo"
@@ -11,9 +13,19 @@ import (
 
 type Dgr struct {
 	Session             *discordgo.Session
+	mu                  sync.RWMutex
 	interactionHandlers map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate)
 	buttonPool          map[string]ButtonInvoker
 	commands            []*discordgo.ApplicationCommand
+}
+
+func (d *Dgr) initLocked() {
+	if d.interactionHandlers == nil {
+		d.interactionHandlers = make(map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate))
+	}
+	if d.buttonPool == nil {
+		d.buttonPool = make(map[string]ButtonInvoker)
+	}
 }
 
 func New(token string) (*Dgr, error) {
@@ -33,10 +45,21 @@ func New(token string) (*Dgr, error) {
 }
 
 func (d *Dgr) SyncCommands(guildID string) error {
+	if d == nil || d.Session == nil {
+		return errors.New("dgr: nil session")
+	}
+	if d.Session.State == nil || d.Session.State.User == nil {
+		return errors.New("dgr: session user is not available; open the session before syncing commands")
+	}
+
+	d.mu.RLock()
+	commands := append([]*discordgo.ApplicationCommand(nil), d.commands...)
+	d.mu.RUnlock()
+
 	_, err := d.Session.ApplicationCommandBulkOverwrite(
 		d.Session.State.User.ID,
 		guildID,
-		d.commands,
+		commands,
 	)
 	return err
 }
@@ -61,21 +84,34 @@ func (d *Dgr) Run(guildID string) error {
 }
 
 func (d *Dgr) Stop() error {
+	if d == nil || d.Session == nil {
+		return nil
+	}
 	return d.Session.Close()
 }
 
 func (d *Dgr) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if d == nil || i == nil || i.Interaction == nil {
+		return
+	}
+
 	switch i.Type {
 
 	case discordgo.InteractionApplicationCommand:
 		name := i.ApplicationCommandData().Name
-		if handler, ok := d.interactionHandlers[name]; ok {
+		d.mu.RLock()
+		handler := d.interactionHandlers[name]
+		d.mu.RUnlock()
+		if handler != nil {
 			handler(s, i)
 		}
 
 	case discordgo.InteractionMessageComponent:
 		customID := i.MessageComponentData().CustomID
-		if btn, ok := d.buttonPool[customID]; ok {
+		d.mu.RLock()
+		btn := d.buttonPool[customID]
+		d.mu.RUnlock()
+		if btn != nil {
 			btn.Invoke(s, i.Interaction)
 		}
 

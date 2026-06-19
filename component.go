@@ -3,6 +3,7 @@ package dgr
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -16,14 +17,19 @@ type Button[T any] struct {
 	CustomID string
 	Style    discordgo.ButtonStyle
 	Handler  func(c *Context[T])
-	Args     T // 💡 コマンド実行時の引数をここに退避
+	Args     T
+	dgr      *Dgr
 }
 
 func (b *Button[T]) Invoke(s *discordgo.Session, i *discordgo.Interaction) {
+	if b == nil || b.Handler == nil {
+		return
+	}
 	newCtx := &Context[T]{
 		Session:     s,
 		Interaction: i,
 		Args:        b.Args,
+		dgr:         b.dgr,
 	}
 	b.Handler(newCtx)
 }
@@ -40,8 +46,10 @@ func (b *Button[T]) ToComponent() discordgo.MessageComponent {
 	}
 }
 
-func generateRandomID() string {
+func generateRandomID() (string, error) {
 	b := make([]byte, 8)
-	_, _ = rand.Read(b)
-	return "btn_" + hex.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate random button ID: %w", err)
+	}
+	return "btn_" + hex.EncodeToString(b), nil
 }

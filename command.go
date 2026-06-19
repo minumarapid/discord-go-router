@@ -1,18 +1,40 @@
 package dgr
 
 import (
+	"fmt"
 	"reflect"
 
 	"github.com/bwmarrin/discordgo"
 )
 
+var (
+	choiceType           = reflect.TypeOf(Choice(false))
+	interactionUserPtr   = reflect.TypeOf((*InteractionUser)(nil))
+	channelPtr           = reflect.TypeOf((*discordgo.Channel)(nil))
+	rolePtr              = reflect.TypeOf((*discordgo.Role)(nil))
+	messageAttachmentPtr = reflect.TypeOf((*discordgo.MessageAttachment)(nil))
+	mentionablePtr       = reflect.TypeOf((*Mentionable)(nil))
+)
+
 func Selected[T any](structPtr *T) *Choice {
-	v := reflect.ValueOf(structPtr).Elem()
+	if structPtr == nil {
+		return nil
+	}
+
+	v := reflect.ValueOf(structPtr)
+	if v.Kind() != reflect.Ptr || v.IsNil() {
+		return nil
+	}
+
+	v = v.Elem()
+	if v.Kind() != reflect.Struct {
+		return nil
+	}
 
 	for i := 0; i < v.NumField(); i++ {
 		field := v.Field(i)
 
-		if field.Kind() == reflect.Bool && field.Bool() {
+		if field.Type() == choiceType && field.Bool() && field.CanAddr() && field.Addr().CanInterface() {
 			return field.Addr().Interface().(*Choice)
 		}
 	}
@@ -20,8 +42,25 @@ func Selected[T any](structPtr *T) *Choice {
 }
 
 func RegSlash[T any](d *Dgr, name string, description string, handler func(c *Context[T])) {
+	if err := RegSlashE(d, name, description, handler); err != nil {
+		panic(err)
+	}
+}
+
+func RegSlashE[T any](d *Dgr, name string, description string, handler func(c *Context[T])) error {
+	if d == nil {
+		return fmt.Errorf("dgr: nil router")
+	}
+	if handler == nil {
+		return fmt.Errorf("dgr: nil slash command handler for %q", name)
+	}
+
 	var tmp T
 	t := reflect.TypeOf(tmp)
+	if t == nil || t.Kind() != reflect.Struct {
+		return fmt.Errorf("dgr: slash command args for %q must be a struct, got %v", name, t)
+	}
+
 	options := make([]*discordgo.ApplicationCommandOption, 0)
 
 	for i := 0; i < t.NumField(); i++ {
@@ -35,42 +74,39 @@ func RegSlash[T any](d *Dgr, name string, description string, handler func(c *Co
 		var optType discordgo.ApplicationCommandOptionType
 		var choices []*discordgo.ApplicationCommandOptionChoice
 
-		// 💡 構造体のフィールド型を直接チェックする
 		fieldType := field.Type
 
 		switch {
-		// 1. 【追加】ユーザー型（統合型）
-		case fieldType == reflect.TypeOf(&InteractionUser{}):
+		case fieldType == interactionUserPtr:
 			optType = discordgo.ApplicationCommandOptionUser
 
-		// 2. 【追加】チャンネル型
-		case fieldType == reflect.TypeOf(&discordgo.Channel{}):
+		case fieldType == channelPtr:
 			optType = discordgo.ApplicationCommandOptionChannel
 
-		// 3. 【追加】ロール型
-		case fieldType == reflect.TypeOf(&discordgo.Role{}):
+		case fieldType == rolePtr:
 			optType = discordgo.ApplicationCommandOptionRole
 
-		// 4. 【追加】添付ファイル型
-		case fieldType == reflect.TypeOf(&discordgo.MessageAttachment{}):
+		case fieldType == messageAttachmentPtr:
 			optType = discordgo.ApplicationCommandOptionAttachment
 
-		case fieldType == reflect.TypeOf(&Mentionable{}):
+		case fieldType == mentionablePtr:
 			optType = discordgo.ApplicationCommandOptionMentionable
 
-		// 5. 既存のベース型判定
 		case fieldType.Kind() == reflect.Int || fieldType.Kind() == reflect.Int64:
 			optType = discordgo.ApplicationCommandOptionInteger
 		case fieldType.Kind() == reflect.Float32 || fieldType.Kind() == reflect.Float64:
 			optType = discordgo.ApplicationCommandOptionNumber
 		case fieldType.Kind() == reflect.Bool:
 			optType = discordgo.ApplicationCommandOptionBoolean
-		case fieldType.Kind() == reflect.Struct: // 前回作ったChoices用
+		case fieldType.Kind() == reflect.Struct:
 			optType = discordgo.ApplicationCommandOptionString
 			choices = make([]*discordgo.ApplicationCommandOptionChoice, 0)
 			structType := field.Type
 			for j := 0; j < structType.NumField(); j++ {
 				subField := structType.Field(j)
+				if subField.Type != choiceType {
+					continue
+				}
 				choices = append(choices, &discordgo.ApplicationCommandOptionChoice{
 					Name:  subField.Name,
 					Value: subField.Name,
@@ -89,6 +125,10 @@ func RegSlash[T any](d *Dgr, name string, description string, handler func(c *Co
 		})
 	}
 
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.initLocked()
+
 	d.commands = append(d.commands, &discordgo.ApplicationCommand{
 		Name:        name,
 		Description: description,
@@ -97,112 +137,7 @@ func RegSlash[T any](d *Dgr, name string, description string, handler func(c *Co
 	})
 
 	d.interactionHandlers[name] = func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-		var args T
-
-		cmdData := i.ApplicationCommandData()
-		sentOptions := cmdData.Options
-		resolved := cmdData.Resolved // 💡 Discordから届いた実体データ（Resolved）
-
-		optionMap := make(map[string]*discordgo.ApplicationCommandInteractionDataOption)
-		for _, opt := range sentOptions {
-			optionMap[opt.Name] = opt
-		}
-
-		v := reflect.ValueOf(&args).Elem()
-		typeOfArgs := v.Type()
-
-		for j := 0; j < typeOfArgs.NumField(); j++ {
-			fieldT := typeOfArgs.Field(j)
-			fieldV := v.Field(j)
-
-			tag := fieldT.Tag.Get("dgr")
-			if tag == "" {
-				continue
-			}
-
-			if opt, ok := optionMap[tag]; ok {
-				fieldType := fieldT.Type
-
-				if resolved == nil {
-					resolved = &discordgo.ApplicationCommandInteractionDataResolved{}
-				}
-
-				// 💡 受信時も型ごとに Resolved からデータを引き抜いて Set する
-				switch {
-				case fieldType == reflect.TypeOf(&InteractionUser{}):
-					userID := opt.Value.(string) // 💡 修正：生のインターフェースから string (ID) をアサーション
-
-					memberData := resolved.Members[userID]
-					if memberData == nil {
-						memberData = &discordgo.Member{}
-					}
-
-					combined := &InteractionUser{
-						User:   resolved.Users[userID],
-						Member: memberData,
-					}
-					fieldV.Set(reflect.ValueOf(combined))
-
-				case fieldType == reflect.TypeOf(&discordgo.Channel{}):
-					chID := opt.Value.(string) // 💡 修正
-					if ch, ok := resolved.Channels[chID]; ok {
-						fieldV.Set(reflect.ValueOf(ch))
-					}
-
-				case fieldType == reflect.TypeOf(&discordgo.Role{}):
-					roleID := opt.Value.(string) // 💡 修正
-					if role, ok := resolved.Roles[roleID]; ok {
-						fieldV.Set(reflect.ValueOf(role))
-					}
-
-				case fieldType == reflect.TypeOf(&discordgo.MessageAttachment{}):
-					attachID := opt.Value.(string) // 💡 修正
-					if attach, ok := resolved.Attachments[attachID]; ok {
-						fieldV.Set(reflect.ValueOf(attach))
-					}
-
-				case fieldType == reflect.TypeOf(&Mentionable{}):
-					id := opt.Value.(string) // 💡 修正
-					m := &Mentionable{}
-
-					if u, ok := resolved.Users[id]; ok {
-						memberData := resolved.Members[id]
-						if memberData == nil {
-							memberData = &discordgo.Member{}
-						}
-						m.User = &InteractionUser{
-							User:   u,
-							Member: memberData,
-						}
-						m.Type = MentionableTypeUser
-					} else if r, ok := resolved.Roles[id]; ok {
-						m.Role = r
-						m.Type = MentionableTypeRole
-					}
-
-					fieldV.Set(reflect.ValueOf(m))
-
-				// 既存のベース型マッピング
-				default:
-					switch fieldV.Kind() {
-					case reflect.String:
-						fieldV.SetString(opt.StringValue())
-					case reflect.Int, reflect.Int64:
-						fieldV.SetInt(opt.IntValue())
-					case reflect.Float32, reflect.Float64:
-						fieldV.SetFloat(opt.FloatValue())
-					case reflect.Bool:
-						fieldV.SetBool(opt.BoolValue())
-					case reflect.Struct:
-						selectedValue := opt.StringValue()
-						structFieldV := fieldV.FieldByName(selectedValue)
-						if structFieldV.IsValid() && structFieldV.Kind() == reflect.Bool {
-							structFieldV.SetBool(true)
-						}
-					}
-				}
-			}
-		}
+		args := parseSlashArgs[T](i)
 
 		handler(&Context[T]{
 			Session:     s,
@@ -211,9 +146,26 @@ func RegSlash[T any](d *Dgr, name string, description string, handler func(c *Co
 			dgr:         d,
 		})
 	}
+
+	return nil
 }
 
 func RegMessageCtx(d *Dgr, name string, handler func(c *Context[discordgo.Message])) {
+	_ = RegMessageCtxE(d, name, handler)
+}
+
+func RegMessageCtxE(d *Dgr, name string, handler func(c *Context[discordgo.Message])) error {
+	if d == nil {
+		return fmt.Errorf("dgr: nil router")
+	}
+	if handler == nil {
+		return fmt.Errorf("dgr: nil message context handler for %q", name)
+	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.initLocked()
+
 	d.commands = append(d.commands, &discordgo.ApplicationCommand{
 		Name: name,
 		Type: discordgo.MessageApplicationCommand,
@@ -237,9 +189,26 @@ func RegMessageCtx(d *Dgr, name string, handler func(c *Context[discordgo.Messag
 			dgr:         d,
 		})
 	}
+
+	return nil
 }
 
 func RegUserCtx(d *Dgr, name string, handler func(c *Context[discordgo.User])) {
+	_ = RegUserCtxE(d, name, handler)
+}
+
+func RegUserCtxE(d *Dgr, name string, handler func(c *Context[discordgo.User])) error {
+	if d == nil {
+		return fmt.Errorf("dgr: nil router")
+	}
+	if handler == nil {
+		return fmt.Errorf("dgr: nil user context handler for %q", name)
+	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.initLocked()
+
 	d.commands = append(d.commands, &discordgo.ApplicationCommand{
 		Name: name,
 		Type: discordgo.UserApplicationCommand,
@@ -262,5 +231,124 @@ func RegUserCtx(d *Dgr, name string, handler func(c *Context[discordgo.User])) {
 			Args:        targetUser,
 			dgr:         d,
 		})
+	}
+
+	return nil
+}
+
+func parseSlashArgs[T any](i *discordgo.InteractionCreate) T {
+	var args T
+	if i == nil {
+		return args
+	}
+
+	cmdData := i.ApplicationCommandData()
+	resolved := cmdData.Resolved
+	if resolved == nil {
+		resolved = &discordgo.ApplicationCommandInteractionDataResolved{}
+	}
+
+	optionMap := make(map[string]*discordgo.ApplicationCommandInteractionDataOption, len(cmdData.Options))
+	for _, opt := range cmdData.Options {
+		if opt != nil {
+			optionMap[opt.Name] = opt
+		}
+	}
+
+	v := reflect.ValueOf(&args).Elem()
+	if v.Kind() != reflect.Struct {
+		return args
+	}
+	typeOfArgs := v.Type()
+
+	for j := 0; j < typeOfArgs.NumField(); j++ {
+		fieldT := typeOfArgs.Field(j)
+		fieldV := v.Field(j)
+
+		tag := fieldT.Tag.Get("dgr")
+		if tag == "" || !fieldV.CanSet() {
+			continue
+		}
+
+		opt := optionMap[tag]
+		if opt == nil {
+			continue
+		}
+
+		setOptionValue(fieldT.Type, fieldV, opt, resolved)
+	}
+
+	return args
+}
+
+func setOptionValue(fieldType reflect.Type, fieldV reflect.Value, opt *discordgo.ApplicationCommandInteractionDataOption, resolved *discordgo.ApplicationCommandInteractionDataResolved) {
+	switch fieldType {
+	case interactionUserPtr:
+		userID := opt.StringValue()
+		user := resolved.Users[userID]
+		member := resolved.Members[userID]
+		if user != nil || member != nil {
+			fieldV.Set(reflect.ValueOf(&InteractionUser{User: user, Member: member}))
+		}
+
+	case channelPtr:
+		if ch := resolved.Channels[opt.StringValue()]; ch != nil {
+			fieldV.Set(reflect.ValueOf(ch))
+		}
+
+	case rolePtr:
+		if role := resolved.Roles[opt.StringValue()]; role != nil {
+			fieldV.Set(reflect.ValueOf(role))
+		}
+
+	case messageAttachmentPtr:
+		if attach := resolved.Attachments[opt.StringValue()]; attach != nil {
+			fieldV.Set(reflect.ValueOf(attach))
+		}
+
+	case mentionablePtr:
+		if mentionable := resolvedMentionable(opt.StringValue(), resolved); mentionable != nil {
+			fieldV.Set(reflect.ValueOf(mentionable))
+		}
+
+	default:
+		setScalarOrChoiceValue(fieldV, opt)
+	}
+}
+
+func resolvedMentionable(id string, resolved *discordgo.ApplicationCommandInteractionDataResolved) *Mentionable {
+	if u := resolved.Users[id]; u != nil {
+		return &Mentionable{
+			User: &InteractionUser{
+				User:   u,
+				Member: resolved.Members[id],
+			},
+			Type: MentionableTypeUser,
+		}
+	}
+	if r := resolved.Roles[id]; r != nil {
+		return &Mentionable{
+			Role: r,
+			Type: MentionableTypeRole,
+		}
+	}
+	return nil
+}
+
+func setScalarOrChoiceValue(fieldV reflect.Value, opt *discordgo.ApplicationCommandInteractionDataOption) {
+	switch fieldV.Kind() {
+	case reflect.String:
+		fieldV.SetString(opt.StringValue())
+	case reflect.Int, reflect.Int64:
+		fieldV.SetInt(opt.IntValue())
+	case reflect.Float32, reflect.Float64:
+		fieldV.SetFloat(opt.FloatValue())
+	case reflect.Bool:
+		fieldV.SetBool(opt.BoolValue())
+	case reflect.Struct:
+		structFieldV := fieldV.FieldByName(opt.StringValue())
+		if structFieldV.IsValid() && structFieldV.Type() == choiceType && structFieldV.CanSet() {
+			structFieldV.SetBool(true)
+		}
 	}
 }

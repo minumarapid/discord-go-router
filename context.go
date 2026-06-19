@@ -1,6 +1,10 @@
 package dgr
 
-import "github.com/bwmarrin/discordgo"
+import (
+	"errors"
+
+	"github.com/bwmarrin/discordgo"
+)
 
 type Context[T any] struct {
 	Session     *discordgo.Session
@@ -9,7 +13,11 @@ type Context[T any] struct {
 	dgr         *Dgr
 }
 
-func (c *Context[T]) Reply(content string, ephemeral bool, button *Button[T]) {
+func (c *Context[T]) Reply(content string, ephemeral bool, button *Button[T], embeds ...*discordgo.MessageEmbed) error {
+	if c == nil || c.Session == nil || c.Interaction == nil {
+		return errors.New("dgr: nil context, session, or interaction")
+	}
+
 	var flags discordgo.MessageFlags
 	if ephemeral {
 		flags = discordgo.MessageFlagsEphemeral
@@ -17,21 +25,32 @@ func (c *Context[T]) Reply(content string, ephemeral bool, button *Button[T]) {
 
 	var components []discordgo.MessageComponent
 	if button != nil {
-		components = append(components, button.ToComponent()) // 💡 コンポーネントに変換
+		components = append(components, button.ToComponent())
 	}
 
-	c.Session.InteractionRespond(c.Interaction, &discordgo.InteractionResponse{
+	return c.Session.InteractionRespond(c.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Content:    content,
 			Flags:      flags,
 			Components: components,
+			Embeds:     embeds,
 		},
 	})
 }
 
-func (c *Context[T]) NewButton(text string, style discordgo.ButtonStyle, handler func(c *Context[T])) *Button[T] {
-	customID := generateRandomID()
+func (c *Context[T]) NewButton(text string, style discordgo.ButtonStyle, handler func(c *Context[T])) (*Button[T], error) {
+	if c == nil || c.dgr == nil {
+		return nil, errors.New("dgr: nil router in context")
+	}
+	if handler == nil {
+		return nil, errors.New("dgr: nil button handler")
+	}
+
+	customID, err := generateRandomID()
+	if err != nil {
+		return nil, err
+	}
 
 	btn := &Button[T]{
 		Text:     text,
@@ -39,9 +58,13 @@ func (c *Context[T]) NewButton(text string, style discordgo.ButtonStyle, handler
 		Style:    style,
 		Handler:  handler,
 		Args:     c.Args,
+		dgr:      c.dgr,
 	}
 
+	c.dgr.mu.Lock()
+	c.dgr.initLocked()
 	c.dgr.buttonPool[customID] = btn
+	c.dgr.mu.Unlock()
 
-	return btn
+	return btn, nil
 }
