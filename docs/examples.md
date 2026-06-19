@@ -1,0 +1,92 @@
+# Examples
+
+## Slash Command With Typed Arguments
+
+```go
+type SayArgs struct {
+	Message string `dgr:"message" desc:"Message to send" required:"true"`
+	Hidden  bool   `dgr:"hidden" desc:"Send as ephemeral response"`
+}
+
+dgr.RegSlash(bot, "say", "Echo a message", func(c *dgr.Context[SayArgs]) {
+	_ = c.Reply(c.Args.Message, c.Args.Hidden, nil)
+})
+```
+
+## Embed Response
+
+```go
+dgr.RegSlash(bot, "status", "Show status", func(c *dgr.Context[struct{}]) {
+	embed := &discordgo.MessageEmbed{
+		Title:       "Status",
+		Description: "All systems operational",
+		Color:       0x57F287,
+	}
+
+	_ = c.Reply("", false, nil, embed)
+})
+```
+
+## User, Role, Channel, And Attachment Options
+
+```go
+type TargetArgs struct {
+	User    *dgr.InteractionUser         `dgr:"user" desc:"User"`
+	Role    *discordgo.Role              `dgr:"role" desc:"Role"`
+	Channel *discordgo.Channel           `dgr:"channel" desc:"Channel"`
+	File    *discordgo.MessageAttachment `dgr:"file" desc:"File"`
+}
+
+dgr.RegSlash(bot, "target", "Inspect resolved options", func(c *dgr.Context[TargetArgs]) {
+	_ = c.Reply("Options parsed", true, nil)
+})
+```
+
+## Mentionable Option
+
+```go
+type MentionArgs struct {
+	Target *dgr.Mentionable `dgr:"target" desc:"User or role" required:"true"`
+}
+
+dgr.RegSlash(bot, "mention", "Inspect a mentionable", func(c *dgr.Context[MentionArgs]) {
+	switch c.Args.Target.Type {
+	case dgr.MentionableTypeUser:
+		_ = c.Reply("User selected", true, nil)
+	case dgr.MentionableTypeRole:
+		_ = c.Reply("Role selected", true, nil)
+	}
+})
+```
+
+## Button Response
+
+```go
+dgr.RegSlash(bot, "button", "Show a button", func(c *dgr.Context[struct{}]) {
+	button, err := c.NewButton("Click me", discordgo.SuccessButton, func(c *dgr.Context[struct{}]) {
+		_ = c.Reply("Clicked", true, nil)
+	})
+	if err != nil {
+		_ = c.Reply("Could not create button", true, nil)
+		return
+	}
+
+	_ = c.Reply("Press the button", true, button)
+})
+```
+
+## Manual Session Lifecycle
+
+Use `Run` for the common case. If you need to control the session lifecycle,
+open the underlying Discord session before calling `SyncCommands`.
+
+```go
+if err := bot.Session.Open(); err != nil {
+	log.Fatal(err)
+}
+defer bot.Stop()
+
+if err := bot.SyncCommands(guildID); err != nil {
+	log.Fatal(err)
+}
+```
