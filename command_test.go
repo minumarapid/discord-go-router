@@ -146,6 +146,68 @@ func TestParseSlashArgsFromSubcommandOptions(t *testing.T) {
 	}
 }
 
+func TestParseSlashArgsResolvesUserOption(t *testing.T) {
+	type args struct {
+		User *InteractionUser `dgr:"user" desc:"User" required:"true"`
+	}
+
+	parsed := parseSlashArgsFromOptions[args](
+		[]*discordgo.ApplicationCommandInteractionDataOption{
+			{
+				Type:  discordgo.ApplicationCommandOptionUser,
+				Name:  "user",
+				Value: "123",
+			},
+		},
+		&discordgo.ApplicationCommandInteractionDataResolved{
+			Users: map[string]*discordgo.User{
+				"123": {ID: "123", Username: "hina"},
+			},
+			Members: map[string]*discordgo.Member{
+				"123": {Nick: "hinat"},
+			},
+		},
+	)
+
+	if parsed.User == nil {
+		t.Fatal("User is nil")
+	}
+	if parsed.User.User == nil || parsed.User.User.ID != "123" {
+		t.Fatalf("User.User = %#v, want ID %q", parsed.User.User, "123")
+	}
+	if parsed.User.Member == nil || parsed.User.Member.Nick != "hinat" {
+		t.Fatalf("User.Member = %#v, want nick %q", parsed.User.Member, "hinat")
+	}
+}
+
+func TestParseSlashArgsResolvesChannelOption(t *testing.T) {
+	type args struct {
+		Channel *discordgo.Channel `dgr:"channel" desc:"Channel" required:"true"`
+	}
+
+	parsed := parseSlashArgsFromOptions[args](
+		[]*discordgo.ApplicationCommandInteractionDataOption{
+			{
+				Type:  discordgo.ApplicationCommandOptionChannel,
+				Name:  "channel",
+				Value: "456",
+			},
+		},
+		&discordgo.ApplicationCommandInteractionDataResolved{
+			Channels: map[string]*discordgo.Channel{
+				"456": {ID: "456", Name: "general"},
+			},
+		},
+	)
+
+	if parsed.Channel == nil {
+		t.Fatal("Channel is nil")
+	}
+	if parsed.Channel.ID != "456" || parsed.Channel.Name != "general" {
+		t.Fatalf("Channel = %#v, want ID %q name %q", parsed.Channel, "456", "general")
+	}
+}
+
 func TestSubGroupRegistersSubcommand(t *testing.T) {
 	type args struct {
 		Name string `dgr:"name" desc:"Name" required:"true"`

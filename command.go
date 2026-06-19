@@ -579,7 +579,13 @@ func choicesFromType(t reflect.Type) []*discordgo.ApplicationCommandOptionChoice
 func setOptionValue(fieldType reflect.Type, fieldV reflect.Value, opt *discordgo.ApplicationCommandInteractionDataOption, resolved *discordgo.ApplicationCommandInteractionDataResolved) {
 	switch fieldType {
 	case interactionUserPtr:
-		userID := opt.StringValue()
+		if resolved == nil {
+			return
+		}
+		userID, ok := optionResolvedID(opt)
+		if !ok {
+			return
+		}
 		user := resolved.Users[userID]
 		member := resolved.Members[userID]
 		if user != nil || member != nil {
@@ -587,28 +593,64 @@ func setOptionValue(fieldType reflect.Type, fieldV reflect.Value, opt *discordgo
 		}
 
 	case channelPtr:
-		if ch := resolved.Channels[opt.StringValue()]; ch != nil {
+		if resolved == nil {
+			return
+		}
+		id, ok := optionResolvedID(opt)
+		if !ok {
+			return
+		}
+		if ch := resolved.Channels[id]; ch != nil {
 			fieldV.Set(reflect.ValueOf(ch))
 		}
 
 	case rolePtr:
-		if role := resolved.Roles[opt.StringValue()]; role != nil {
+		if resolved == nil {
+			return
+		}
+		id, ok := optionResolvedID(opt)
+		if !ok {
+			return
+		}
+		if role := resolved.Roles[id]; role != nil {
 			fieldV.Set(reflect.ValueOf(role))
 		}
 
 	case messageAttachmentPtr:
-		if attach := resolved.Attachments[opt.StringValue()]; attach != nil {
+		if resolved == nil {
+			return
+		}
+		id, ok := optionResolvedID(opt)
+		if !ok {
+			return
+		}
+		if attach := resolved.Attachments[id]; attach != nil {
 			fieldV.Set(reflect.ValueOf(attach))
 		}
 
 	case mentionablePtr:
-		if mentionable := resolvedMentionable(opt.StringValue(), resolved); mentionable != nil {
+		if resolved == nil {
+			return
+		}
+		id, ok := optionResolvedID(opt)
+		if !ok {
+			return
+		}
+		if mentionable := resolvedMentionable(id, resolved); mentionable != nil {
 			fieldV.Set(reflect.ValueOf(mentionable))
 		}
 
 	default:
 		setScalarOrChoiceValue(fieldV, opt)
 	}
+}
+
+func optionResolvedID(opt *discordgo.ApplicationCommandInteractionDataOption) (string, bool) {
+	if opt == nil {
+		return "", false
+	}
+	id, ok := opt.Value.(string)
+	return id, ok
 }
 
 func resolvedMentionable(id string, resolved *discordgo.ApplicationCommandInteractionDataResolved) *Mentionable {
