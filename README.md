@@ -8,6 +8,7 @@ typed context, and reply with messages, embeds, and simple buttons.
 ## Features
 
 - Slash commands from struct fields and `dgr` tags
+- Slash command groups with subcommands and subcommand groups
 - Message and user context menu commands
 - Typed command arguments through `Context[T]`
 - Built-in interaction replies with ephemeral messages, embeds, and one button
@@ -140,6 +141,31 @@ Without tags, the Go field name is used for both the Discord choice name and
 value. `Selected` returns the selected `*Choice`; `SelectedChoiceOf` returns the
 selected choice plus its configured `Name` and `Value`.
 
+## Subcommands
+
+Use `Group` to create a slash command with subcommands.
+
+```go
+type BanArgs struct {
+	User   *dgr.InteractionUser `dgr:"user" desc:"User to ban" required:"true"`
+	Reason string               `dgr:"reason" desc:"Reason"`
+}
+
+admin := dgr.Group(bot, "admin", "Admin commands")
+dgr.RegSlash(admin, "ban", "Ban a user", func(c *dgr.Context[BanArgs]) {
+	_ = c.Reply("Banned", dgr.WithEphemeral())
+})
+```
+
+Use `SubGroup` when you need `/admin users ban` style nesting.
+
+```go
+users := dgr.SubGroup(admin, "users", "User commands")
+dgr.RegSlash(users, "ban", "Ban a user", func(c *dgr.Context[BanArgs]) {
+	_ = c.Reply("Banned", dgr.WithEphemeral())
+})
+```
+
 ## Replies
 
 Use `Context.Reply` to respond to the interaction.
@@ -216,6 +242,10 @@ panic or ignored error:
 err := dgr.RegSlashE(bot, "ping", "Reply with pong", handler)
 err = dgr.RegMessageCtxE(bot, "Inspect message", messageHandler)
 err = dgr.RegUserCtxE(bot, "Inspect user", userHandler)
+group, err := dgr.GroupE(bot, "admin", "Admin commands")
+err = dgr.RegSlashE(group, "ban", "Ban a user", banHandler)
+users, err := dgr.SubGroupE(group, "users", "User commands")
+err = dgr.RegSlashE(users, "ban", "Ban a user", banHandler)
 ```
 
 ## More Documentation

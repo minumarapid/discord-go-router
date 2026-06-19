@@ -88,6 +88,35 @@ dgr.RegSlash(bot, "mode", "Select a mode", func(c *dgr.Context[ModeArgs]) {
 })
 ```
 
+## Subcommands
+
+```go
+type KickArgs struct {
+	User   *dgr.InteractionUser `dgr:"user" desc:"User to kick" required:"true"`
+	Reason string               `dgr:"reason" desc:"Reason"`
+}
+
+moderation := dgr.Group(bot, "moderation", "Moderation commands")
+dgr.RegSlash(moderation, "kick", "Kick a user", func(c *dgr.Context[KickArgs]) {
+	_ = c.Reply("Kicked", dgr.WithEphemeral())
+})
+```
+
+## Subcommand Groups
+
+```go
+type BanArgs struct {
+	User   *dgr.InteractionUser `dgr:"user" desc:"User to ban" required:"true"`
+	Reason string               `dgr:"reason" desc:"Reason"`
+}
+
+admin := dgr.Group(bot, "admin", "Admin commands")
+users := dgr.SubGroup(admin, "users", "User commands")
+dgr.RegSlash(users, "ban", "Ban a user", func(c *dgr.Context[BanArgs]) {
+	_ = c.Reply("Banned", dgr.WithEphemeral())
+})
+```
+
 ## Button Response
 
 ```go

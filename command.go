@@ -22,6 +22,10 @@ type SelectedChoice struct {
 	Value  string
 }
 
+type SlashTarget interface {
+	slashTarget()
+}
+
 func Selected[T any](structPtr *T) *Choice {
 	selected := SelectedChoiceOf(structPtr)
 	if selected == nil {
@@ -61,13 +65,28 @@ func SelectedChoiceOf[T any](structPtr *T) *SelectedChoice {
 	return nil
 }
 
-func RegSlash[T any](d *Dgr, name string, description string, handler func(c *Context[T])) {
-	if err := RegSlashE(d, name, description, handler); err != nil {
+func RegSlash[T any](target SlashTarget, name string, description string, handler func(c *Context[T])) {
+	if err := RegSlashE(target, name, description, handler); err != nil {
 		panic(err)
 	}
 }
 
-func RegSlashE[T any](d *Dgr, name string, description string, handler func(c *Context[T])) error {
+func RegSlashE[T any](target SlashTarget, name string, description string, handler func(c *Context[T])) error {
+	switch t := target.(type) {
+	case *Dgr:
+		return regRootSlashE(t, name, description, handler)
+	case *CommandGroup:
+		return regGroupSlashE(t, name, description, handler)
+	case *SubCommandGroup:
+		return regSubGroupSlashE(t, name, description, handler)
+	default:
+		return fmt.Errorf("dgr: unsupported slash command target %T", target)
+	}
+}
+
+func (*Dgr) slashTarget() {}
+
+func regRootSlashE[T any](d *Dgr, name string, description string, handler func(c *Context[T])) error {
 	if d == nil {
 		return fmt.Errorf("dgr: nil router")
 	}
@@ -81,74 +100,18 @@ func RegSlashE[T any](d *Dgr, name string, description string, handler func(c *C
 		return fmt.Errorf("dgr: slash command args for %q must be a struct, got %v", name, t)
 	}
 
-	options := make([]*discordgo.ApplicationCommandOption, 0)
-
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-
-		cmdTag := field.Tag.Get("dgr")
-		if cmdTag == "" {
-			continue
-		}
-
-		var optType discordgo.ApplicationCommandOptionType
-		var choices []*discordgo.ApplicationCommandOptionChoice
-
-		fieldType := field.Type
-
-		switch {
-		case fieldType == interactionUserPtr:
-			optType = discordgo.ApplicationCommandOptionUser
-
-		case fieldType == channelPtr:
-			optType = discordgo.ApplicationCommandOptionChannel
-
-		case fieldType == rolePtr:
-			optType = discordgo.ApplicationCommandOptionRole
-
-		case fieldType == messageAttachmentPtr:
-			optType = discordgo.ApplicationCommandOptionAttachment
-
-		case fieldType == mentionablePtr:
-			optType = discordgo.ApplicationCommandOptionMentionable
-
-		case fieldType.Kind() == reflect.Int || fieldType.Kind() == reflect.Int64:
-			optType = discordgo.ApplicationCommandOptionInteger
-		case fieldType.Kind() == reflect.Float32 || fieldType.Kind() == reflect.Float64:
-			optType = discordgo.ApplicationCommandOptionNumber
-		case fieldType.Kind() == reflect.Bool:
-			optType = discordgo.ApplicationCommandOptionBoolean
-		case fieldType.Kind() == reflect.Struct:
-			optType = discordgo.ApplicationCommandOptionString
-			choices = make([]*discordgo.ApplicationCommandOptionChoice, 0)
-			structType := field.Type
-			for j := 0; j < structType.NumField(); j++ {
-				subField := structType.Field(j)
-				if subField.Type != choiceType {
-					continue
-				}
-				spec := choiceSpecFromField(subField)
-				choices = append(choices, &discordgo.ApplicationCommandOptionChoice{
-					Name:  spec.Name,
-					Value: spec.Value,
-				})
-			}
-		default:
-			optType = discordgo.ApplicationCommandOptionString
-		}
-
-		options = append(options, &discordgo.ApplicationCommandOption{
-			Type:        optType,
-			Name:        cmdTag,
-			Description: field.Tag.Get("desc"),
-			Required:    field.Tag.Get("required") == "true",
-			Choices:     choices,
-		})
+	options, err := slashOptionsFromType(t)
+	if err != nil {
+		return err
 	}
 
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.initLocked()
+
+	if _, exists := d.interactionHandlers[name]; exists {
+		return fmt.Errorf("dgr: command %q is already registered", name)
+	}
 
 	d.commands = append(d.commands, &discordgo.ApplicationCommand{
 		Name:        name,
@@ -169,6 +132,248 @@ func RegSlashE[T any](d *Dgr, name string, description string, handler func(c *C
 	}
 
 	return nil
+}
+
+type CommandGroup struct {
+	d       *Dgr
+	command *discordgo.ApplicationCommand
+}
+
+func (*CommandGroup) slashTarget() {}
+
+type SubCommandGroup struct {
+	d       *Dgr
+	command *discordgo.ApplicationCommand
+	option  *discordgo.ApplicationCommandOption
+}
+
+func (*SubCommandGroup) slashTarget() {}
+
+func Group(d *Dgr, name string, description string) *CommandGroup {
+	group, err := GroupE(d, name, description)
+	if err != nil {
+		panic(err)
+	}
+	return group
+}
+
+func GroupE(d *Dgr, name string, description string) (*CommandGroup, error) {
+	if d == nil {
+		return nil, fmt.Errorf("dgr: nil router")
+	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.initLocked()
+
+	if _, exists := d.interactionHandlers[name]; exists {
+		return nil, fmt.Errorf("dgr: command %q is already registered", name)
+	}
+
+	command := &discordgo.ApplicationCommand{
+		Name:        name,
+		Description: description,
+		Type:        discordgo.ChatApplicationCommand,
+		Options:     []*discordgo.ApplicationCommandOption{},
+	}
+	d.commands = append(d.commands, command)
+	d.interactionHandlers[name] = groupInteractionHandler(d)
+
+	return &CommandGroup{d: d, command: command}, nil
+}
+
+func SubGroup(group *CommandGroup, name string, description string) *SubCommandGroup {
+	subGroup, err := SubGroupE(group, name, description)
+	if err != nil {
+		panic(err)
+	}
+	return subGroup
+}
+
+func SubGroupE(group *CommandGroup, name string, description string) (*SubCommandGroup, error) {
+	if group == nil || group.d == nil || group.command == nil {
+		return nil, fmt.Errorf("dgr: nil command group")
+	}
+
+	group.d.mu.Lock()
+	defer group.d.mu.Unlock()
+	group.d.initLocked()
+
+	for _, opt := range group.command.Options {
+		if opt.Name == name {
+			return nil, fmt.Errorf("dgr: subcommand or group %q is already registered in %q", name, group.command.Name)
+		}
+	}
+
+	option := &discordgo.ApplicationCommandOption{
+		Type:        discordgo.ApplicationCommandOptionSubCommandGroup,
+		Name:        name,
+		Description: description,
+		Options:     []*discordgo.ApplicationCommandOption{},
+	}
+	group.command.Options = append(group.command.Options, option)
+
+	return &SubCommandGroup{
+		d:       group.d,
+		command: group.command,
+		option:  option,
+	}, nil
+}
+
+func regGroupSlashE[T any](g *CommandGroup, name string, description string, handler func(c *Context[T])) error {
+	if g == nil || g.d == nil || g.command == nil {
+		return fmt.Errorf("dgr: nil command group")
+	}
+	if handler == nil {
+		return fmt.Errorf("dgr: nil subcommand handler for %q", name)
+	}
+
+	var tmp T
+	t := reflect.TypeOf(tmp)
+	if t == nil || t.Kind() != reflect.Struct {
+		return fmt.Errorf("dgr: subcommand args for %q must be a struct, got %v", name, t)
+	}
+
+	options, err := slashOptionsFromType(t)
+	if err != nil {
+		return err
+	}
+
+	g.d.mu.Lock()
+	defer g.d.mu.Unlock()
+	g.d.initLocked()
+
+	for _, opt := range g.command.Options {
+		if opt.Name == name {
+			return fmt.Errorf("dgr: subcommand %q is already registered in %q", name, g.command.Name)
+		}
+	}
+
+	g.command.Options = append(g.command.Options, &discordgo.ApplicationCommandOption{
+		Type:        discordgo.ApplicationCommandOptionSubCommand,
+		Name:        name,
+		Description: description,
+		Options:     options,
+	})
+
+	handlerKey := groupHandlerKey(g.command.Name, name)
+	g.d.interactionHandlers[handlerKey] = func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		data := i.ApplicationCommandData()
+		if len(data.Options) == 0 || data.Options[0] == nil {
+			return
+		}
+
+		args := parseSlashArgsFromOptions[T](data.Options[0].Options, data.Resolved)
+		handler(&Context[T]{
+			Session:     s,
+			Interaction: i.Interaction,
+			Args:        args,
+			dgr:         g.d,
+		})
+	}
+
+	return nil
+}
+
+func regSubGroupSlashE[T any](g *SubCommandGroup, name string, description string, handler func(c *Context[T])) error {
+	if g == nil || g.d == nil || g.command == nil || g.option == nil {
+		return fmt.Errorf("dgr: nil subcommand group")
+	}
+	if handler == nil {
+		return fmt.Errorf("dgr: nil subcommand handler for %q", name)
+	}
+
+	var tmp T
+	t := reflect.TypeOf(tmp)
+	if t == nil || t.Kind() != reflect.Struct {
+		return fmt.Errorf("dgr: subcommand args for %q must be a struct, got %v", name, t)
+	}
+
+	options, err := slashOptionsFromType(t)
+	if err != nil {
+		return err
+	}
+
+	g.d.mu.Lock()
+	defer g.d.mu.Unlock()
+	g.d.initLocked()
+
+	for _, opt := range g.option.Options {
+		if opt.Name == name {
+			return fmt.Errorf("dgr: subcommand %q is already registered in %q %q", name, g.command.Name, g.option.Name)
+		}
+	}
+
+	g.option.Options = append(g.option.Options, &discordgo.ApplicationCommandOption{
+		Type:        discordgo.ApplicationCommandOptionSubCommand,
+		Name:        name,
+		Description: description,
+		Options:     options,
+	})
+
+	handlerKey := subGroupHandlerKey(g.command.Name, g.option.Name, name)
+	g.d.interactionHandlers[handlerKey] = func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		data := i.ApplicationCommandData()
+		subcommand := selectedSubcommandOption(data.Options)
+		if subcommand == nil {
+			return
+		}
+
+		args := parseSlashArgsFromOptions[T](subcommand.Options, data.Resolved)
+		handler(&Context[T]{
+			Session:     s,
+			Interaction: i.Interaction,
+			Args:        args,
+			dgr:         g.d,
+		})
+	}
+
+	return nil
+}
+
+func groupInteractionHandler(d *Dgr) func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	return func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		data := i.ApplicationCommandData()
+		if len(data.Options) == 0 || data.Options[0] == nil {
+			return
+		}
+
+		key := interactionHandlerKey(data.Name, data.Options[0])
+		d.mu.RLock()
+		handler := d.interactionHandlers[key]
+		d.mu.RUnlock()
+		if handler != nil {
+			handler(s, i)
+		}
+	}
+}
+
+func interactionHandlerKey(commandName string, opt *discordgo.ApplicationCommandInteractionDataOption) string {
+	if opt.Type != discordgo.ApplicationCommandOptionSubCommandGroup || len(opt.Options) == 0 || opt.Options[0] == nil {
+		return groupHandlerKey(commandName, opt.Name)
+	}
+	return subGroupHandlerKey(commandName, opt.Name, opt.Options[0].Name)
+}
+
+func selectedSubcommandOption(options []*discordgo.ApplicationCommandInteractionDataOption) *discordgo.ApplicationCommandInteractionDataOption {
+	if len(options) == 0 || options[0] == nil {
+		return nil
+	}
+	if options[0].Type != discordgo.ApplicationCommandOptionSubCommandGroup {
+		return options[0]
+	}
+	if len(options[0].Options) == 0 {
+		return nil
+	}
+	return options[0].Options[0]
+}
+
+func groupHandlerKey(groupName string, subcommandName string) string {
+	return groupName + " " + subcommandName
+}
+
+func subGroupHandlerKey(groupName string, subGroupName string, subcommandName string) string {
+	return groupName + " " + subGroupName + " " + subcommandName
 }
 
 func RegMessageCtx(d *Dgr, name string, handler func(c *Context[discordgo.Message])) {
@@ -264,13 +469,17 @@ func parseSlashArgs[T any](i *discordgo.InteractionCreate) T {
 	}
 
 	cmdData := i.ApplicationCommandData()
-	resolved := cmdData.Resolved
+	return parseSlashArgsFromOptions[T](cmdData.Options, cmdData.Resolved)
+}
+
+func parseSlashArgsFromOptions[T any](options []*discordgo.ApplicationCommandInteractionDataOption, resolved *discordgo.ApplicationCommandInteractionDataResolved) T {
+	var args T
 	if resolved == nil {
 		resolved = &discordgo.ApplicationCommandInteractionDataResolved{}
 	}
 
-	optionMap := make(map[string]*discordgo.ApplicationCommandInteractionDataOption, len(cmdData.Options))
-	for _, opt := range cmdData.Options {
+	optionMap := make(map[string]*discordgo.ApplicationCommandInteractionDataOption, len(options))
+	for _, opt := range options {
 		if opt != nil {
 			optionMap[opt.Name] = opt
 		}
@@ -300,6 +509,71 @@ func parseSlashArgs[T any](i *discordgo.InteractionCreate) T {
 	}
 
 	return args
+}
+
+func slashOptionsFromType(t reflect.Type) ([]*discordgo.ApplicationCommandOption, error) {
+	options := make([]*discordgo.ApplicationCommandOption, 0)
+
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+
+		cmdTag := field.Tag.Get("dgr")
+		if cmdTag == "" {
+			continue
+		}
+
+		optType, choices := slashOptionType(field.Type)
+		options = append(options, &discordgo.ApplicationCommandOption{
+			Type:        optType,
+			Name:        cmdTag,
+			Description: field.Tag.Get("desc"),
+			Required:    field.Tag.Get("required") == "true",
+			Choices:     choices,
+		})
+	}
+
+	return options, nil
+}
+
+func slashOptionType(fieldType reflect.Type) (discordgo.ApplicationCommandOptionType, []*discordgo.ApplicationCommandOptionChoice) {
+	switch {
+	case fieldType == interactionUserPtr:
+		return discordgo.ApplicationCommandOptionUser, nil
+	case fieldType == channelPtr:
+		return discordgo.ApplicationCommandOptionChannel, nil
+	case fieldType == rolePtr:
+		return discordgo.ApplicationCommandOptionRole, nil
+	case fieldType == messageAttachmentPtr:
+		return discordgo.ApplicationCommandOptionAttachment, nil
+	case fieldType == mentionablePtr:
+		return discordgo.ApplicationCommandOptionMentionable, nil
+	case fieldType.Kind() == reflect.Int || fieldType.Kind() == reflect.Int64:
+		return discordgo.ApplicationCommandOptionInteger, nil
+	case fieldType.Kind() == reflect.Float32 || fieldType.Kind() == reflect.Float64:
+		return discordgo.ApplicationCommandOptionNumber, nil
+	case fieldType.Kind() == reflect.Bool:
+		return discordgo.ApplicationCommandOptionBoolean, nil
+	case fieldType.Kind() == reflect.Struct:
+		return discordgo.ApplicationCommandOptionString, choicesFromType(fieldType)
+	default:
+		return discordgo.ApplicationCommandOptionString, nil
+	}
+}
+
+func choicesFromType(t reflect.Type) []*discordgo.ApplicationCommandOptionChoice {
+	choices := make([]*discordgo.ApplicationCommandOptionChoice, 0)
+	for j := 0; j < t.NumField(); j++ {
+		subField := t.Field(j)
+		if subField.Type != choiceType {
+			continue
+		}
+		spec := choiceSpecFromField(subField)
+		choices = append(choices, &discordgo.ApplicationCommandOptionChoice{
+			Name:  spec.Name,
+			Value: spec.Value,
+		})
+	}
+	return choices
 }
 
 func setOptionValue(fieldType reflect.Type, fieldV reflect.Value, opt *discordgo.ApplicationCommandInteractionDataOption, resolved *discordgo.ApplicationCommandInteractionDataResolved) {

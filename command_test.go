@@ -83,3 +83,158 @@ func TestSelectedChoiceOfReturnsTags(t *testing.T) {
 		t.Fatal("selected choice pointer does not point to the selected field")
 	}
 }
+
+func TestGroupRegistersSubcommand(t *testing.T) {
+	type args struct {
+		Name string `dgr:"name" desc:"Name" required:"true"`
+	}
+
+	d := &Dgr{}
+	group, err := GroupE(d, "admin", "Admin commands")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RegSlashE(group, "ban", "Ban a user", func(c *Context[args]) {}); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(d.commands) != 1 {
+		t.Fatalf("got %d commands, want 1", len(d.commands))
+	}
+
+	command := d.commands[0]
+	if command.Name != "admin" || command.Description != "Admin commands" {
+		t.Fatalf("unexpected command: %#v", command)
+	}
+	if len(command.Options) != 1 {
+		t.Fatalf("got %d command options, want 1", len(command.Options))
+	}
+
+	subcommand := command.Options[0]
+	if subcommand.Type != discordgo.ApplicationCommandOptionSubCommand {
+		t.Fatalf("subcommand type = %v, want %v", subcommand.Type, discordgo.ApplicationCommandOptionSubCommand)
+	}
+	if subcommand.Name != "ban" || subcommand.Description != "Ban a user" {
+		t.Fatalf("unexpected subcommand: %#v", subcommand)
+	}
+	if len(subcommand.Options) != 1 || subcommand.Options[0].Name != "name" {
+		t.Fatalf("unexpected subcommand options: %#v", subcommand.Options)
+	}
+	if d.interactionHandlers[groupHandlerKey("admin", "ban")] == nil {
+		t.Fatal("subcommand handler was not registered")
+	}
+}
+
+func TestParseSlashArgsFromSubcommandOptions(t *testing.T) {
+	type args struct {
+		Name string `dgr:"name" desc:"Name" required:"true"`
+	}
+
+	parsed := parseSlashArgsFromOptions[args](
+		[]*discordgo.ApplicationCommandInteractionDataOption{
+			{
+				Type:  discordgo.ApplicationCommandOptionString,
+				Name:  "name",
+				Value: "hina",
+			},
+		},
+		nil,
+	)
+
+	if parsed.Name != "hina" {
+		t.Fatalf("Name = %q, want %q", parsed.Name, "hina")
+	}
+}
+
+func TestSubGroupRegistersSubcommand(t *testing.T) {
+	type args struct {
+		Name string `dgr:"name" desc:"Name" required:"true"`
+	}
+
+	d := &Dgr{}
+	group, err := GroupE(d, "admin", "Admin commands")
+	if err != nil {
+		t.Fatal(err)
+	}
+	users, err := SubGroupE(group, "users", "User commands")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RegSlashE(users, "ban", "Ban a user", func(c *Context[args]) {}); err != nil {
+		t.Fatal(err)
+	}
+
+	command := d.commands[0]
+	if len(command.Options) != 1 {
+		t.Fatalf("got %d command options, want 1", len(command.Options))
+	}
+
+	subGroup := command.Options[0]
+	if subGroup.Type != discordgo.ApplicationCommandOptionSubCommandGroup {
+		t.Fatalf("subgroup type = %v, want %v", subGroup.Type, discordgo.ApplicationCommandOptionSubCommandGroup)
+	}
+	if subGroup.Name != "users" || subGroup.Description != "User commands" {
+		t.Fatalf("unexpected subgroup: %#v", subGroup)
+	}
+	if len(subGroup.Options) != 1 {
+		t.Fatalf("got %d subgroup options, want 1", len(subGroup.Options))
+	}
+
+	subcommand := subGroup.Options[0]
+	if subcommand.Type != discordgo.ApplicationCommandOptionSubCommand {
+		t.Fatalf("subcommand type = %v, want %v", subcommand.Type, discordgo.ApplicationCommandOptionSubCommand)
+	}
+	if subcommand.Name != "ban" || subcommand.Description != "Ban a user" {
+		t.Fatalf("unexpected subcommand: %#v", subcommand)
+	}
+	if len(subcommand.Options) != 1 || subcommand.Options[0].Name != "name" {
+		t.Fatalf("unexpected subcommand options: %#v", subcommand.Options)
+	}
+	if d.interactionHandlers[subGroupHandlerKey("admin", "users", "ban")] == nil {
+		t.Fatal("subcommand handler was not registered")
+	}
+}
+
+func TestInteractionHandlerKeyForSubGroup(t *testing.T) {
+	opt := &discordgo.ApplicationCommandInteractionDataOption{
+		Type: discordgo.ApplicationCommandOptionSubCommandGroup,
+		Name: "users",
+		Options: []*discordgo.ApplicationCommandInteractionDataOption{
+			{
+				Type: discordgo.ApplicationCommandOptionSubCommand,
+				Name: "ban",
+			},
+		},
+	}
+
+	got := interactionHandlerKey("admin", opt)
+	want := subGroupHandlerKey("admin", "users", "ban")
+	if got != want {
+		t.Fatalf("key = %q, want %q", got, want)
+	}
+}
+
+func TestSelectedSubcommandOptionForSubGroup(t *testing.T) {
+	subcommand := &discordgo.ApplicationCommandInteractionDataOption{
+		Type: discordgo.ApplicationCommandOptionSubCommand,
+		Name: "ban",
+		Options: []*discordgo.ApplicationCommandInteractionDataOption{
+			{
+				Type:  discordgo.ApplicationCommandOptionString,
+				Name:  "name",
+				Value: "hina",
+			},
+		},
+	}
+
+	got := selectedSubcommandOption([]*discordgo.ApplicationCommandInteractionDataOption{
+		{
+			Type:    discordgo.ApplicationCommandOptionSubCommandGroup,
+			Name:    "users",
+			Options: []*discordgo.ApplicationCommandInteractionDataOption{subcommand},
+		},
+	})
+	if got != subcommand {
+		t.Fatalf("selected subcommand = %#v, want %#v", got, subcommand)
+	}
+}

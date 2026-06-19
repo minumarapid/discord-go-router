@@ -45,12 +45,35 @@ session is a no-op.
 ### Slash Commands
 
 ```go
-func RegSlash[T any](d *Dgr, name string, description string, handler func(c *Context[T]))
-func RegSlashE[T any](d *Dgr, name string, description string, handler func(c *Context[T])) error
+type SlashTarget interface {
+	// contains filtered or unexported methods
+}
+
+func RegSlash[T any](target SlashTarget, name string, description string, handler func(c *Context[T]))
+func RegSlashE[T any](target SlashTarget, name string, description string, handler func(c *Context[T])) error
 ```
 
-`T` must be a struct. Fields with a `dgr` tag become slash command options.
-`RegSlash` panics when registration fails. `RegSlashE` returns the error.
+`target` must be `*Dgr` for a top-level slash command, `*CommandGroup` for a
+subcommand, or `*SubCommandGroup` for a nested subcommand. `T` must be a struct.
+Fields with a `dgr` tag become slash command options. `RegSlash` panics when
+registration fails. `RegSlashE` returns the error.
+
+### Slash Command Groups
+
+```go
+func Group(d *Dgr, name string, description string) *CommandGroup
+func GroupE(d *Dgr, name string, description string) (*CommandGroup, error)
+func SubGroup(group *CommandGroup, name string, description string) *SubCommandGroup
+func SubGroupE(group *CommandGroup, name string, description string) (*SubCommandGroup, error)
+```
+
+`Group` creates a top-level slash command whose options are subcommands or
+subcommand groups. `SubGroup` creates a Discord subcommand group under a
+`*CommandGroup`. Register subcommands with `RegSlash` or `RegSlashE`, passing
+the returned `*CommandGroup` or `*SubCommandGroup` as the first argument. The
+handler receives typed args parsed from the selected subcommand options.
+`Group`, `SubGroup`, and `RegSlash` panic on registration errors. The `E`
+variants return errors.
 
 ### Message Context Menu Commands
 
