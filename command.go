@@ -731,3 +731,32 @@ func setChoiceValue(fieldV reflect.Value, selectedValue string) {
 		}
 	}
 }
+
+func RegMsgCreate(d *Dgr, channelIDs []string, handler func(c *MsgCreateCtx)) {
+	_ = RegMsgCreateE(d, channelIDs, handler)
+}
+
+func RegMsgCreateE(d *Dgr, channelIDs []string, handler func(c *MsgCreateCtx)) error {
+	if d == nil {
+		return fmt.Errorf("dgr: nil router")
+	}
+	if handler == nil {
+		return fmt.Errorf("dgr: nil message create context handler")
+	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.initLocked()
+
+	for _, channelID := range channelIDs {
+		d.messageHandlers[channelID] = append(d.messageHandlers[channelID], func(s *discordgo.Session, m *discordgo.MessageCreate) {
+			handler(&MsgCreateCtx{
+				Session: s,
+				Args:    m.Message,
+				dgr:     d,
+			})
+		})
+	}
+
+	return nil
+}

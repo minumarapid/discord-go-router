@@ -107,3 +107,9 @@ func (c *Context[T]) NewButtonRow(buttons ...ButtonComponent) (*ButtonRow, error
 	}
 	return row, nil
 }
+
+type MsgCreateCtx struct {
+	Session *discordgo.Session
+	Args    *discordgo.Message
+	dgr     *Dgr
+}

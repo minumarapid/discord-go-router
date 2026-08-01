@@ -16,6 +16,7 @@ type Dgr struct {
 	mu                  sync.RWMutex
 	interactionHandlers map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate)
 	buttonPool          map[string]ButtonInvoker
+	messageHandlers 	  map[string][]func(s *discordgo.Session, m *discordgo.MessageCreate)
 	commands            []*discordgo.ApplicationCommand
 }
 
@@ -25,6 +26,9 @@ func (d *Dgr) initLocked() {
 	}
 	if d.buttonPool == nil {
 		d.buttonPool = make(map[string]ButtonInvoker)
+	}
+	if d.messageHandlers == nil {
+		d.messageHandlers = make(map[string][]func(s *discordgo.Session, m *discordgo.MessageCreate))
 	}
 }
 
@@ -37,9 +41,11 @@ func New(token string) (*Dgr, error) {
 		Session:             session,
 		interactionHandlers: make(map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate)),
 		buttonPool:          make(map[string]ButtonInvoker),
+		messageHandlers:     make(map[string][]func(s *discordgo.Session, m *discordgo.MessageCreate)),
 	}
 
 	session.AddHandler(d.onInteraction)
+	session.AddHandler(d.onMsgCreate)
 
 	return d, nil
 }
@@ -117,5 +123,20 @@ func (d *Dgr) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 
 	default:
 		return
+	}
+}
+
+func (d *Dgr) onMsgCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
+	channelID := m.ChannelID
+	d.mu.RLock()
+	handlers := d.messageHandlers[channelID]
+	handlers = append(handlers, d.messageHandlers["*"]...)
+	d.mu.RUnlock()
+	if len(handlers) > 0 {
+		for _, handler := range handlers {
+			if handler != nil {
+				handler(s, m)
+			}
+		}
 	}
 }
