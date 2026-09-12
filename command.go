@@ -84,6 +84,10 @@ func RegSlashE[T any](target SlashTarget, name string, description string, handl
 	}
 }
 
+func (d *Dgr) Slash[T any](name string, description string, handler func(c *Context[T])) error {
+	return RegSlashE(d, name, description, handler)
+}
+
 func (*Dgr) slashTarget() {}
 
 func regRootSlashE[T any](d *Dgr, name string, description string, handler func(c *Context[T])) error {
@@ -139,12 +143,20 @@ type CommandGroup struct {
 	command *discordgo.ApplicationCommand
 }
 
+func (g *CommandGroup) Slash[T any](name string, description string, handler func(c *Context[T])) error {
+	return regGroupSlashE(g, name, description, handler)
+}
+
 func (*CommandGroup) slashTarget() {}
 
 type SubCommandGroup struct {
 	d       *Dgr
 	command *discordgo.ApplicationCommand
 	option  *discordgo.ApplicationCommandOption
+}
+
+func (g *SubCommandGroup) Slash[T any](name string, description string, handler func(c *Context[T])) error {
+	return regSubGroupSlashE(g, name, description, handler)
 }
 
 func (*SubCommandGroup) slashTarget() {}
@@ -180,6 +192,10 @@ func GroupE(d *Dgr, name string, description string) (*CommandGroup, error) {
 	d.interactionHandlers[name] = groupInteractionHandler(d)
 
 	return &CommandGroup{d: d, command: command}, nil
+}
+
+func (d *Dgr) Group(name string, description string) (*CommandGroup, error) {
+	return GroupE(d, name, description)
 }
 
 func SubGroup(group *CommandGroup, name string, description string) *SubCommandGroup {
@@ -218,6 +234,10 @@ func SubGroupE(group *CommandGroup, name string, description string) (*SubComman
 		command: group.command,
 		option:  option,
 	}, nil
+}
+
+func (d *CommandGroup) Group(name string, description string) (*SubCommandGroup, error) {
+	return SubGroupE(d, name, description)
 }
 
 func regGroupSlashE[T any](g *CommandGroup, name string, description string, handler func(c *Context[T])) error {
@@ -419,6 +439,11 @@ func RegMessageCtxE(d *Dgr, name string, handler func(c *Context[discordgo.Messa
 	return nil
 }
 
+func (d *Dgr) Message(name string, handler func(c *Context[discordgo.Message])) error {
+	return RegMessageCtxE(d, name, handler)
+}
+
+
 func RegUserCtx(d *Dgr, name string, handler func(c *Context[discordgo.User])) {
 	_ = RegUserCtxE(d, name, handler)
 }
@@ -460,6 +485,10 @@ func RegUserCtxE(d *Dgr, name string, handler func(c *Context[discordgo.User])) 
 	}
 
 	return nil
+}
+
+func (d *Dgr) User(name string, handler func(c *Context[discordgo.User])) error {
+	return RegUserCtxE(d, name, handler)
 }
 
 func parseSlashArgs[T any](i *discordgo.InteractionCreate) T {
@@ -730,6 +759,10 @@ func setChoiceValue(fieldV reflect.Value, selectedValue string) {
 			return
 		}
 	}
+}
+
+func (d *Dgr) MessageCreate(channelIDs []string, handler func(c *MsgCreateCtx)) error {
+	return RegMsgCreateE(d, channelIDs, handler)
 }
 
 func RegMsgCreate(d *Dgr, channelIDs []string, handler func(c *MsgCreateCtx)) {
