@@ -1,6 +1,6 @@
 module github.com/minumarapid/discord-go-router
 
-go 1.25.9
+go 1.27.0
 
 require github.com/bwmarrin/discordgo v0.29.0
 

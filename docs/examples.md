@@ -2,10 +2,16 @@
 
 ## Slash Command With Typed Arguments
 
+Fields with a `dgr` tag become command options. `desc` sets the option
+description and `required:"true"` marks it required. `string`, `int`/`int64`,
+`float32`/`float64`, and `bool` map to the corresponding Discord option types.
+
 ```go
 type SayArgs struct {
-	Message string `dgr:"message" desc:"Message to send" required:"true"`
-	Hidden  bool   `dgr:"hidden" desc:"Send as ephemeral response"`
+	Message string  `dgr:"message" desc:"Message to send" required:"true"`
+	Count   int     `dgr:"count" desc:"Repeat count"`
+	Rate    float64 `dgr:"rate" desc:"Rate"`
+	Hidden  bool    `dgr:"hidden" desc:"Send as ephemeral response"`
 }
 
 dgr.RegSlash(bot, "say", "Echo a message", func(c *dgr.Context[SayArgs]) {
@@ -16,6 +22,17 @@ dgr.RegSlash(bot, "say", "Echo a message", func(c *dgr.Context[SayArgs]) {
 
 	_ = c.Reply(c.Args.Message, opts...)
 })
+```
+
+The method form is equivalent and returns the registration error instead of
+panicking:
+
+```go
+if err := bot.Slash("say", "Echo a message", func(c *dgr.Context[SayArgs]) {
+	_ = c.Reply(c.Args.Message)
+}); err != nil {
+	log.Fatal(err)
+}
 ```
 
 ## Embed Response
@@ -32,7 +49,11 @@ dgr.RegSlash(bot, "status", "Show status", func(c *dgr.Context[struct{}]) {
 })
 ```
 
+Use `struct{}` as the type argument for commands with no options.
+
 ## User, Role, Channel, And Attachment Options
+
+Resolved option types are pointers and stay nil when omitted or unresolvable.
 
 ```go
 type TargetArgs struct {
@@ -48,6 +69,9 @@ dgr.RegSlash(bot, "target", "Inspect resolved options", func(c *dgr.Context[Targ
 ```
 
 ## Mentionable Option
+
+A mentionable resolves to either a user or a role. Mark it `required:"true"`
+when the handler dereferences it unconditionally.
 
 ```go
 type MentionArgs struct {
@@ -65,6 +89,9 @@ dgr.RegSlash(bot, "mention", "Inspect a mentionable", func(c *dgr.Context[Mentio
 ```
 
 ## Tagged Choices
+
+A struct field whose type is a struct containing `dgr.Choice` fields becomes a
+String option with choices. The selected field is set to `true`.
 
 ```go
 type ModeChoices struct {
@@ -88,6 +115,11 @@ dgr.RegSlash(bot, "mode", "Select a mode", func(c *dgr.Context[ModeArgs]) {
 })
 ```
 
+`dgr` sets both choice name and value, `name` (or its alias `label`) sets the
+name, and `value` sets the value. Without tags the Go field name is used for
+both. Use `dgr.Selected(&c.Args.Mode)` when only the `*dgr.Choice` pointer is
+needed.
+
 ## Subcommands
 
 ```go
@@ -101,6 +133,9 @@ dgr.RegSlash(moderation, "kick", "Kick a user", func(c *dgr.Context[KickArgs]) {
 	_ = c.Reply("Kicked", dgr.WithEphemeral())
 })
 ```
+
+The method forms (`bot.Group`, `group.Slash`) are equivalent and return errors
+instead of panicking.
 
 ## Subcommand Groups
 
@@ -117,7 +152,14 @@ dgr.RegSlash(users, "ban", "Ban a user", func(c *dgr.Context[BanArgs]) {
 })
 ```
 
+`admin.Group("users", "User commands")` is the same as
+`dgr.SubGroup(admin, "users", "User commands")`.
+
 ## Button Response
+
+`NewButton` copies the current `Args` into the button handler context.
+`NewButtonRow` groups up to 5 buttons into one action row; buttons with
+different type arguments can share a row.
 
 ```go
 dgr.RegSlash(bot, "button", "Show a button", func(c *dgr.Context[struct{}]) {
@@ -147,6 +189,58 @@ dgr.RegSlash(bot, "button", "Show a button", func(c *dgr.Context[struct{}]) {
 })
 ```
 
+For a single button, skip the row and use `WithButton`:
+
+```go
+dgr.RegSlash(bot, "confirm", "Show a confirm button", func(c *dgr.Context[struct{}]) {
+	yes, err := c.NewButton("Confirm", discordgo.SuccessButton, func(c *dgr.Context[struct{}]) {
+		_ = c.Reply("Confirmed", dgr.WithEphemeral())
+	})
+	if err != nil {
+		_ = c.Reply("Could not create button", dgr.WithEphemeral())
+		return
+	}
+
+	_ = c.Reply("Continue?", dgr.WithEphemeral(), dgr.WithButton(yes))
+})
+```
+
+## Context Menu Commands
+
+The target message or user is available as `c.Args`.
+
+```go
+dgr.RegMessageCtx(bot, "Inspect message", func(c *dgr.Context[discordgo.Message]) {
+	_ = c.Reply(c.Args.Content, dgr.WithEphemeral())
+})
+
+dgr.RegUserCtx(bot, "Inspect user", func(c *dgr.Context[discordgo.User]) {
+	_ = c.Reply(c.Args.Username, dgr.WithEphemeral())
+})
+```
+
+## Message Create Handlers
+
+`RegMsgCreate` subscribes to plain messages, not interactions. Pass channel IDs
+to filter, or `"*"` to receive every channel. `MsgCreateCtx` has no `Reply`
+helper; use `c.Session` to send messages.
+
+```go
+dgr.RegMsgCreate(bot, []string{"*"}, func(c *dgr.MsgCreateCtx) {
+	_, _ = c.Session.ChannelMessageSend(c.Args.ChannelID, "Received: "+c.Args.Content)
+})
+```
+
+To watch one channel only:
+
+```go
+if err := bot.MessageCreate([]string{"1234567890"}, func(c *dgr.MsgCreateCtx) {
+	_, _ = c.Session.ChannelMessageSend(c.Args.ChannelID, "Noted")
+}); err != nil {
+	log.Fatal(err)
+}
+```
+
 ## Manual Session Lifecycle
 
 Use `Run` for the common case. If you need to control the session lifecycle,
@@ -162,3 +256,5 @@ if err := bot.SyncCommands(guildID); err != nil {
 	log.Fatal(err)
 }
 ```
+
+Pass an empty `guildID` to sync global commands instead of guild commands.
